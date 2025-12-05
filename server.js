@@ -16,6 +16,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const JWT_SECRET = process.env.JWT_SECRET;
 
+/* ---------------- COMMON HEADERS ---------------- */
 const headers = {
   apikey: SERVICE_KEY,
   Authorization: `Bearer ${SERVICE_KEY}`,
@@ -24,30 +25,30 @@ const headers = {
 
 /* ---------------- SUPABASE HELPERS ---------------- */
 async function sbGet(table, query = "") {
-  return (
-    await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
-      headers,
-    })
-  ).json();
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+    headers,
+  });
+  return r.json();
 }
+
 async function sbPost(table, body) {
-  return (
-    await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    })
-  ).json();
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return r.json();
 }
+
 async function sbPatch(table, query, body) {
-  return (
-    await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify(body),
-    })
-  ).json();
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return r.json();
 }
+
 async function sbDelete(table, query) {
   return await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
     method: "DELETE",
@@ -55,36 +56,35 @@ async function sbDelete(table, query) {
   });
 }
 
-/* ---------------- AUTH MIDDLEWARE ---------------- */
-function token(id) {
+/* ---------------- JWT TOKEN ---------------- */
+function makeToken(id) {
   return jwt.sign({ id }, JWT_SECRET, { expiresIn: "7d" });
 }
 
+/* ---------------- AUTH MIDDLEWARE ---------------- */
 function auth(req, res, next) {
-  const t = req.headers.authorization?.split(" ")[1];
-  if (!t) return res.status(401).json({ error: "Unauthorized" });
+  const bearer = req.headers.authorization?.split(" ")[1];
+  if (!bearer) return res.status(401).json({ error: "Unauthorized" });
 
   try {
-    const user = jwt.verify(t, JWT_SECRET);
-    req.userId = user.id;
+    const data = jwt.verify(bearer, JWT_SECRET);
+    req.userId = data.id;
     next();
   } catch {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
 
-/* ---------------- ROLE CHECK ---------------- */
+/* ---------------- ROLE HELPERS ---------------- */
 async function isAdmin(id) {
   const u = await sbGet("users", `?id=eq.${id}&select=role`);
   return u[0]?.role === "admin";
 }
+
 async function isOwner(id) {
   const u = await sbGet("users", `?id=eq.${id}&select=role`);
   return u[0]?.role === "owner";
 }
-
-/* ---------------- ROOT ---------------- */
-app.get("/", (req, res) => res.send("Brush Backend Running 🔥"));
 
 /* ---------------- AUTH ---------------- */
 app.post("/auth/signup", async (req, res) => {
@@ -94,7 +94,6 @@ app.post("/auth/signup", async (req, res) => {
   if (exist.length) return res.status(400).json({ error: "Email exists" });
 
   const hashed = await bcrypt.hash(password, 10);
-
   const user = await sbPost("users", {
     name,
     email,
@@ -103,7 +102,7 @@ app.post("/auth/signup", async (req, res) => {
     created_at: new Date().toISOString(),
   });
 
-  res.json({ token: token(user[0].id), user: user[0] });
+  res.json({ token: makeToken(user[0].id), user: user[0] });
 });
 
 app.post("/auth/login", async (req, res) => {
@@ -118,14 +117,7 @@ app.post("/auth/login", async (req, res) => {
   if (!ok) return res.status(400).json({ error: "Wrong password" });
 
   delete user.password;
-  res.json({ token: token(user.id), user });
-});
-
-app.get("/auth/me", auth, async (req, res) => {
-  const rows = await sbGet("users", `?id=eq.${req.userId}&select=*`);
-  const user = rows[0];
-  delete user.password;
-  res.json(user);
+  res.json({ token: makeToken(user.id), user });
 });
 
 /* ---------------- PRODUCTS ---------------- */
@@ -157,12 +149,7 @@ app.patch("/products/:id", auth, async (req, res) => {
   if (!(await isOwner(req.userId)))
     return res.status(403).json({ error: "Owner only" });
 
-  const out = await sbPatch(
-    "products",
-    `?id=eq.${req.params.id}`,
-    req.body
-  );
-
+  const out = await sbPatch("products", `?id=eq.${req.params.id}`, req.body);
   res.json(out);
 });
 
@@ -172,39 +159,6 @@ app.delete("/products/:id", auth, async (req, res) => {
 
   await sbDelete("products", `?id=eq.${req.params.id}`);
   res.json({ deleted: true });
-});
-
-/* ---------------- LOGS ---------------- */
-app.post("/logs/add", auth, async (req, res) => {
-  const log = await sbPost("logs", {
-    user_id: req.userId,
-    action: req.body.action,
-    created_at: new Date().toISOString(),
-  });
-
-  res.json(log[0]);
-});
-
-app.get("/logs", auth, async (req, res) => {
-  const list = await sbGet("logs", "?select=*");
-  res.json(list);
-});
-
-/* ---------------- ROLES ---------------- */
-app.get("/roles", auth, async (req, res) => {
-  const r = await sbGet("roles", "?select=*");
-  res.json(r);
-});
-
-app.post("/roles/add", auth, async (req, res) => {
-  if (!(await isAdmin(req.userId)))
-    return res.status(403).json({ error: "Admin only" });
-
-  const role = await sbPost("roles", {
-    name: req.body.name,
-  });
-
-  res.json(role[0]);
 });
 
 /* ---------------- ADMIN ---------------- */
