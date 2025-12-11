@@ -10,7 +10,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ============ TEST ============
+// TEST
 app.get("/", (req, res) => {
   res.send("Apcolite Brush Backend Running ✅");
 });
@@ -21,19 +21,32 @@ app.get("/", (req, res) => {
 app.post("/api/auth/signup", async (req, res) => {
   const { email, password } = req.body;
 
-  const { data, error } = await supabase.auth.signUp({
+  // 1️⃣ Supabase Auth SignUp
+  const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password
   });
 
-  if (error) return res.status(400).json({ error: error.message });
+  if (authError) {
+    return res.status(400).json({ error: authError.message });
+  }
 
-  // Insert user in users table
-  await supabase.from("users").insert([
-    { id: data.user.id, email: email, role: "user" }
-  ]);
+  // authData.user sometimes null → FIX
+  const userId = authData?.user?.id;
+  if (!userId) {
+    return res.status(400).json({ error: "Signup failed. user.id missing" });
+  }
 
-  res.json({ success: true, user: data.user });
+  // 2️⃣ Insert user in users table
+  const { error: insertError } = await supabase
+    .from("users")
+    .insert([{ id: userId, email: email, role: "user" }]);
+
+  if (insertError) {
+    return res.status(400).json({ error: insertError.message });
+  }
+
+  res.json({ success: true, user: authData.user });
 });
 
 // LOGIN
@@ -55,15 +68,14 @@ app.post("/api/auth/login", async (req, res) => {
   res.json({ user: data.user, token });
 });
 
-// ============ USERS ============
-
+// USERS LIST
 app.get("/users", async (req, res) => {
   const { data, error } = await supabase.from("users").select("*");
-  if (error) return res.status(400).json({ error });
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 });
 
-// Make OWNER
+// MAKE OWNER
 app.post("/make-owner", async (req, res) => {
   const { user_id } = req.body;
 
@@ -72,18 +84,18 @@ app.post("/make-owner", async (req, res) => {
     .update({ role: "owner" })
     .eq("id", user_id);
 
-  if (error) return res.status(400).json({ error });
+  if (error) return res.status(400).json({ error: error.message });
   res.json({ success: true, message: "User is now OWNER ✅" });
 });
 
-// ============ PRODUCTS ============
-
+// PRODUCTS LIST
 app.get("/products", async (req, res) => {
   const { data, error } = await supabase.from("products").select("*");
-  if (error) return res.status(400).json({ error });
+  if (error) return res.status(400).json({ error: error.message });
   res.json(data);
 });
 
+// ADD PRODUCT
 app.post("/add-product", async (req, res) => {
   const { name, price, image } = req.body;
 
@@ -91,12 +103,11 @@ app.post("/add-product", async (req, res) => {
     .from("products")
     .insert([{ name, price, image }]);
 
-  if (error) return res.status(400).json({ error });
+  if (error) return res.status(400).json({ error: error.message });
   res.json({ success: true });
 });
 
-// ============ REALTIME ============
-
+// REALTIME
 supabase
   .channel("realtime-products")
   .on(
@@ -108,8 +119,7 @@ supabase
   )
   .subscribe();
 
-// ============ SERVER START ============
-
+// SERVER
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
