@@ -1,6 +1,6 @@
 import express from "express";
 import shopkeeperOnly from "../middleware/shopkeeper.js";
-import { becomeShopkeeper, shopkeeperDashboard } from "../controllers/shopkeepercontroller.js";
+import { becomeShopkeeper, shopkeeperDashboard } from "../controllers/shopkeeper.controller.js";
 
 const router = express.Router();
 
